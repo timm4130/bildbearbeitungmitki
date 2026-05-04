@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Bildbearbeitung mit KI – Prompt-Builder</title>
+
+  <!-- Tailwind (Play CDN, JIT im Browser) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Importmap: React + lucide-react via esm.sh -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+      "lucide-react": "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1"
+    }
+  }
+  </script>
+
+  <!-- Babel Standalone für JSX-Transpilation im Browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    html, body { -webkit-tap-highlight-color: transparent; }
+    /* Sanfte Optimierung für iOS-Eingabefelder */
+    textarea, input { font-size: 16px; } /* verhindert Zoom-In auf iOS beim Fokus */
+    /* "select-all" Hilfsklasse für den Prompt-Output */
+    .select-all { user-select: all; -webkit-user-select: all; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module" data-presets="react">
+    import React, { useState, useMemo, useEffect, useRef } from "react";
+    import { createRoot } from "react-dom/client";
+    import { Copy, Check, ChevronDown, ChevronUp, Sparkles, AlertTriangle, Info, GraduationCap } from "lucide-react";
+
+    /* ═══════ LEARNING CONTENT ═══════ */
+    const LEARN_HINTS = {
+      objects: "Präzise Objektbeschreibungen sind entscheidend. Statt 'Auto' → 'red vintage 1967 Ford Mustang'. Fachvokabular signalisiert dem Modell, dass du weißt, was du willst.",
+      light: "Licht-Prompts brauchen: Richtung, Qualität (hart/weich), Farbe, Intensität. 'Weiches Licht' ist vage – 'soft diffused window light from camera left creating gentle falloff' ist präzise.",
+      shot: "Einstellungsgrößen sind Filmsprache. Das Modell kennt 'Close-up', 'Medium shot', 'Wide shot' – nutze diese etablierten Begriffe statt vager Beschreibungen.",
+      perspective: "Kamerawinkel ändern die Bildwirkung fundamental. Fachbegriffe wie 'Low angle', 'Dutch tilt', 'Bird's eye' sind präziser als 'von unten' oder 'schräg'.",
+      dof: "Blenden-Fachsprache: f/1.4 (offene Blende = viel Bokeh), f/16 (geschlossene Blende = alles scharf). Technische Begriffe erzeugen präzisere Ergebnisse als 'verschwommen'.",
+      colorCorr: "Farbkorrektur-Prompts profitieren von Fachbegriffen: 'lifted shadows', 'crushed blacks', 'color grading', 'LUT'. Beschreibe Farben präzise: 'teal shadows' statt 'blaue Schatten'.",
+      film: "Film-Simulationen brauchen spezifische Namen (CineStill 800T, Portra 400). Das Modell kennt diese Looks und kann sie gezielt reproduzieren.",
+    };
+
+    const PROMPT_TIPS = [
+      { trigger: /hell|dunkel|bright|dark(?!\s*ambient)/i, tip: "💡 Präziser: Gib Belichtungswerte an (z.B. '+1 stop exposure', 'underexposed by half a stop') oder beschreibe die Lichtqualität ('bright high-key lighting', 'moody low-key with deep shadows')." },
+      { trigger: /schön|gut|nice|good|better/i, tip: "💡 'Schön' ist subjektiv! Beschreibe konkret WAS du willst: Farben? Kontrast? Stimmung? Schärfe?" },
+      { trigger: /mehr|less|more(?!\s+(contrast|detail|saturation))/i, tip: "💡 'Mehr' wovon? Sei spezifisch: 'more background blur (f/1.8)', 'more contrast in midtones', 'more saturated colors in the 50-70% range'." },
+      { trigger: /warm|kalt|cool(?!\s+(tones|temperature))/i, tip: "💡 Nutze Farbtemperatur-Fachsprache: '3200K tungsten warmth', '5600K daylight neutral', '7000K cool blue cast'." },
+      { trigger: /verschwommen|blur(?!red)/i, tip: "💡 Welche Art Unschärfe? 'Background bokeh (f/1.4)', 'motion blur from panning', 'gaussian blur for dreamy effect', 'depth-of-field falloff'?" },
+    ];
+
+    /* ═══════ LIGHTING: STIMMUNG ═══════ */
+    const LIGHT_MOOD = [
+      { id:"highkey", label:"High Key", icon:"☀️", desc:"Hell, weich, optimistisch", p:"Apply high-key lighting: bright, evenly lit environment with low contrast, soft white diffused light, minimal shadows, ethereal and optimistic mood, slightly overexposed background. The image should feel airy, clean, and uplifting.", info:"Prompt-Tipp: 'High-key' ist Fachsprache für helle, kontrastarme Beleuchtung. Präziser als 'hell' oder 'bright'." },
+      { id:"lowkey", label:"Low Key", icon:"🌑", desc:"Dunkel, mysteriös, spannungsvoll", p:"Apply low-key lighting: predominantly dark scene with deep blacks, selective minimal illumination creating dramatic pools of light, shadows dominant across most of the frame, suspenseful atmosphere with silhouette hints. Strong contrast between the few illuminated areas and the surrounding darkness.", info:"Prompt-Tipp: 'Low-key' beschreibt dunkle, kontrastreiche Beleuchtung. Technischer Begriff aus der Fotografie." },
+      { id:"day", label:"Tageslicht", icon:"🌤️", desc:"Natürlich, klar, neutral", p:"Relight the scene as if shot in bright natural daylight under a clear sky. Even, neutral-white illumination, soft natural shadows falling downward, neutral white balance with no strong color cast.", info:"Prompt-Tipp: Beschreibe Lichtqualität (weich/hart), Richtung (von oben), und Farbtemperatur (5600K daylight)." },
+      { id:"night", label:"Nacht", icon:"🌙", desc:"Dunkel, kühl, lokale Lichtquellen", p:"Relight the scene as if shot at night. Dark ambient surroundings with cool blue-black tones. Visible artificial light sources (streetlights, windows) cast localized warm pools of light with strong, clearly defined shadows. High contrast between illuminated and dark areas.", info:"Prompt-Tipp: Spezifiziere Lichtquellen konkret: 'streetlights', 'neon signs', 'window light'." },
+      { id:"sunset", label:"Sonnenuntergang", icon:"🌅", desc:"Warm, golden-orange, lange Schatten", p:"Relight the scene as if bathed in warm sunset light. Deep golden-orange color temperature, strong directional light from a low sun angle near the horizon, long dramatic shadows stretching across the scene, warm highlights on skin and surfaces, slightly underexposed cool shadows on the opposite side.", info:"Prompt-Tipp: Technische Details wie 'low sun angle', '2500K color temperature', 'long shadows' machen den Prompt präzise." },
+    ];
+
+    /* ═══════ LIGHTING: RICHTUNG ═══════ */
+    const LIGHT_DIR = [
+      { id:"frontal", label:"Frontallicht (Butterfly)", icon:"🦋", desc:"Gleichmäßig von vorn, schmeichelnd, schmetterlingsförmiger Schatten unter der Nase",
+        p:"Apply butterfly lighting (also known as Paramount lighting): place the key light directly in front of and slightly above the subject, angled down. This creates a characteristic small butterfly-shaped shadow directly under the nose and defined shadows under the cheekbones and chin. The result is glamorous, symmetrical, and flattering – it emphasizes cheekbones and jawline while minimizing wrinkles and imperfections.",
+        info:"Prompt-Tipp: 'Butterfly lighting' ist präziser als 'von vorn'. Beschreibe die charakteristische Schattenform." },
+      { id:"rembrandt", label:"Seitenlicht (Rembrandt)", icon:"🎨", desc:"45° seitlich, Lichtdreieck auf Wange, dramatisch-malerisch",
+        p:"Apply Rembrandt lighting: key light positioned high and at roughly 45 degrees to one side, creating the signature small inverted triangle of light on the subject's cheek on the shadow side. The opposite side of the face is mostly illuminated. This chiaroscuro technique produces a dramatic, painterly mood with strong three-dimensionality, depth, and emotional intensity – evoking mystery and storytelling power.",
+        info:"Prompt-Tipp: Nenne das 'inverted triangle' – das ist das charakteristische Merkmal von Rembrandt-Licht." },
+      { id:"split", label:"Seitenlicht (Split)", icon:"◐", desc:"90° seitlich, halbes Gesicht im Schatten, maximaler Kontrast",
+        p:"Apply split lighting: key light placed at exactly 90 degrees to the side of the subject. Exactly one half of the face is illuminated while the other half falls into deep shadow. This creates maximum dramatic contrast, a sense of duality, tension, and mystery. Often used for moody portraits of musicians and artists.",
+        info:"Prompt-Tipp: Präzise Winkel ('90 degrees') und Kontrast-Beschreibung ('one half illuminated, one half shadow')." },
+      { id:"streif", label:"Streiflicht (Kicker)", icon:"〰️", desc:"Seitlich-von-hinten, betont Konturen und Texturen",
+        p:"Apply kicker/edge lighting: a light source positioned to the side and slightly behind the subject, creating a narrow bright strip along the subject's edge and contour. This emphasizes surface texture, outlines the subject's form, and creates dramatic depth separation. Hard, directional light that skims across surfaces revealing every texture detail.",
+        info:"Prompt-Tipp: 'Kicker light' oder 'edge lighting' – etablierte Fachbegriffe aus der Studiofotografie." },
+      { id:"top", label:"Oberlicht (Toplight)", icon:"⬇️", desc:"Steil von oben, tiefe Augenhöhlenschatten, mysteriös-hart",
+        p:"Apply top lighting: a single strong light source directly above the subject, angled steeply downward. This casts deep, dark shadows into the eye sockets, under the nose, and under the chin, making the subject appear mysterious, harsh, or authoritative. The forehead and shoulders are brightly illuminated while the face partially disappears into shadow.",
+        info:"Prompt-Tipp: Beschreibe die Schattenposition ('eye sockets', 'under nose') für präzise Ergebnisse." },
+      { id:"under", label:"Unterlicht", icon:"⬆️", desc:"Von unten, unheimlich-übernatürlich, verkehrte Schatten",
+        p:"Apply underlighting (uplight): light source positioned below the subject's face, pointing upward. This casts unnatural upward shadows across the face – shadows above the eyebrows, beneath the cheekbones pointing up, and an illuminated chin and nostrils. The effect is deeply unsettling, eerie, and supernatural, evoking horror and unease because it contradicts how we naturally perceive light falling from above.",
+        info:"Prompt-Tipp: 'Underlighting' oder 'uplight from below' – erkläre den unnatürlichen Effekt." },
+      { id:"back", label:"Gegenlicht (Silhouette)", icon:"🌓", desc:"Von hinten, Silhouette, dramatische Trennung",
+        p:"Apply strong backlighting: the main light source is positioned directly behind the subject. The subject's front is in deep shadow or full silhouette, while a bright rim of light outlines the subject's edges (hair, shoulders, contour). This creates maximum drama, a sense of mystery and anonymity, and strong visual separation between subject and background.",
+        info:"Prompt-Tipp: 'Backlighting' + 'silhouette' + 'rim light' – kombiniere diese Fachbegriffe." },
+      { id:"backfill", label:"Gegenlicht + Fill", icon:"💡", desc:"Von hinten + Aufhellung von vorn, Tiefe mit Detail",
+        p:"Apply backlighting with front fill: strong rim/back light from behind the subject creating a glowing outline around hair and shoulders, combined with a softer, less intense fill light or reflector from the front to gently illuminate the subject's face and details. This balances dramatic depth separation with visible facial detail – the subject glows from behind while remaining recognizable from the front.",
+        info:"Prompt-Tipp: Beschreibe Licht-Verhältnis: 'strong backlight' + 'soft front fill' (ratio wichtig!)." },
+      { id:"rim", label:"Rim Light (Haarlicht)", icon:"💫", desc:"Lichtkante um Kopf/Schultern, hebt vom Hintergrund ab",
+        p:"Apply rim lighting (hair light): a focused light from behind and above, creating a bright glowing outline (rim) around the subject's head, hair, and shoulders. The front of the subject remains darker. This separates the subject from the background, adds a halo-like three-dimensional quality, and creates elegant cinematic depth.",
+        info:"Prompt-Tipp: 'Rim light' oder 'hair light' – beide Begriffe sind etabliert, nutze sie abwechselnd." },
+    ];
+
+    /* ═══════ SHOT SIZES ═══════ */
+    const SHOTS = [
+      { id:"supertotale", label:"Supertotale", desc:"Maximale Übersicht, Person winzig in Umgebung – Einführung in Ort & Situation",
+        p:"by dramatically zooming out to an extreme wide shot (establishing shot), making the subject appear very small within a vast, expansive environment. Reveal the full scope of the location to provide maximum spatial context and a sense of scale, grandeur, or isolation. Naturally extend the scene far beyond the original frame.",
+        info:"Prompt-Tipp: 'Extreme wide shot' oder 'establishing shot' sind filmische Fachbegriffe. Präziser als 'sehr weit weg'." },
+      { id:"totale", label:"Totale", desc:"Ganze Person mit viel Umgebung – Überblick, Einführung der Person im Umfeld",
+        p:"by zooming out to a wide shot (long shot) showing the subject from head to toe with substantial surrounding environment visible. The subject is clearly identifiable but the setting dominates, establishing the relationship between person and place.",
+        info:"Prompt-Tipp: 'Wide shot' oder 'long shot' – etablierte Filmsprache für Ganzkörper mit Umgebung." },
+      { id:"halbtotale", label:"Halbtotale", desc:"Ganze Person mit wenig Umgebung – Handlungssituation wird gezeigt",
+        p:"by adjusting to a medium long shot (full shot) showing the subject from head to toe, roughly filling the frame. Enough environment is visible to establish the action context, but the subject becomes the clear focus. Body language and movement are emphasized.",
+        info:"Prompt-Tipp: 'Full shot' zeigt Ganzkörper, aber das Subjekt füllt den Frame. Klarer als 'ganze Person'." },
+      { id:"amerikanische", label:"Amerikanische", desc:"Person bis Knie – Hervorheben der Handlung ('Cowboy Shot')",
+        p:"by reframing to an American shot (cowboy shot), showing the subject from roughly mid-thigh up. This framing emphasizes the subject's physical actions and gestures while maintaining enough body context. Named after Western films where the holstered gun needed to be visible.",
+        info:"Prompt-Tipp: 'American shot' oder 'cowboy shot' – historischer Fachbegriff aus Western-Filmen." },
+      { id:"halbnahe", label:"Halbnahe", desc:"Person bis Hüfte – Kommunikationssituation, Betonung der Gestik",
+        p:"by reframing to a medium shot, showing the subject from the waist up. This natural conversational distance emphasizes upper body language, hand gestures, and facial expression while retaining some environmental context. The standard shot for dialogue and interpersonal communication.",
+        info:"Prompt-Tipp: 'Medium shot' ist DIE Standard-Einstellung für Dialoge. Nutze diesen Begriff." },
+      { id:"nahe", label:"Nahe", desc:"Kopf mit Brust – dem Gesicht nahe, respektvoller Abstand",
+        p:"by moving the camera closer to a medium close-up, showing the subject from the chest or shoulders up. The face is clearly the focus but the framing maintains a comfortable, respectful distance. Ideal for drawing attention to a person while preserving some personal space and upper body language.",
+        info:"Prompt-Tipp: 'Medium close-up' zeigt Gesicht + Schultern. Unterscheide klar von 'close-up'." },
+      { id:"gross", label:"Großaufnahme (Close-up)", desc:"Kopf bildfüllend – Mimik, Emotion, intime Nähe & Identifikation",
+        p:"by moving the camera to a close-up framing, filling the frame with the subject's head and face. This shot reveals subtle facial expressions, micro-emotions, and creates a strong sense of intimacy and emotional identification with the subject. Every nuance of the face becomes visible.",
+        info:"Prompt-Tipp: 'Close-up' ist der Fachbegriff für kopffüllende Aufnahme. Sehr präzise Definition." },
+      { id:"detail", label:"Detailaufnahme (Extreme Close-up)", desc:"Einzelnes Detail bildfüllend – maximale emotionale Nähe",
+        p:"by moving the camera extremely close to the [DETAIL], creating a tight extreme close-up that fills the entire frame with only this one detail. This shot creates maximum emotional intensity, reveals textures and nuances invisible at normal distance, and forces the viewer into an intimate, almost uncomfortable proximity.", needsDetail:true,
+        info:"Prompt-Tipp: 'Extreme close-up' für Details wie Augen, Hände. Spezifiziere immer WAS im Detail gezeigt wird." },
+    ];
+
+    /* ═══════ PERSPECTIVES ═══════ */
+    const PERSPS = [
+      { id:"frontal", label:"Frontal", desc:"Geradeaus auf Augenhöhe – neutral, direkt, konfrontativ",
+        p:"from a straight-on frontal angle at the subject's eye level, facing the subject directly. This neutral perspective creates a direct, confrontational connection between viewer and subject.",
+        info:"Prompt-Tipp: 'Eye-level frontal angle' ist neutraler Ausgangspunkt. Klar und präzise." },
+      { id:"profil", label:"Profil (Seitenansicht)", desc:"Exakt 90° seitlich – Silhouette, Nachdenklichkeit",
+        p:"from a pure profile angle (exactly 90 degrees to the side), showing the subject's full side silhouette. This perspective emphasizes the contour of the face, nose, chin, and creates a contemplative, introspective mood.",
+        info:"Prompt-Tipp: Spezifiziere '90 degrees' für echtes Profil. 45° wäre 'three-quarter view'." },
+      { id:"lower", label:"Untersicht", desc:"Leicht von unten – Stärke, Überlegenheit, Macht",
+        p:"by lowering the camera below the subject's eye level and tilting it slightly upward toward the subject. This low angle makes the subject appear powerful, imposing, heroic, or dominant.",
+        info:"Prompt-Tipp: 'Low angle' lässt Subjekte mächtig wirken. Beschreibe Winkel für Präzision (z.B. '30 degrees below eye level')." },
+      { id:"verylow", label:"Extreme Untersicht (Frosch)", desc:"Vom Boden aufwärts – maximale Überhöhung, Bedrohung",
+        p:"from a very low camera position near the ground (frog perspective), looking steeply upward at the subject. This extreme low angle maximally emphasizes power, grandeur, or menace – the subject towers over the viewer.",
+        info:"Prompt-Tipp: 'Frog perspective' oder 'worm's-eye view' – etablierte Begriffe für extreme Untersicht." },
+      { id:"higher", label:"Leichte Aufsicht", desc:"Leicht von oben – Verletzlichkeit, Unterordnung",
+        p:"by raising the camera slightly above the subject's eye level and tilting it downward. This high angle makes the subject appear smaller, more vulnerable, subordinate, or approachable.",
+        info:"Prompt-Tipp: 'High angle' oder 'slightly elevated camera' macht Subjekte vulnerabel/kleiner." },
+      { id:"aerial", label:"Vogelperspektive", desc:"Steil von oben – Übersicht, Kontrollverlust, Isolation",
+        p:"by elevating the camera to a steep aerial position looking down on the subject from high above (bird's-eye view), while maintaining a slightly forward-facing oblique angle (not perfectly straight down). This perspective creates a sense of overview, smallness, exposure, or loss of control.",
+        info:"Prompt-Tipp: 'Bird's-eye view' oder 'aerial view' für steile Aufsicht. Unterscheide von 'top-down' (direkt von oben)." },
+      { id:"dutch", label:"Dutch Angle", desc:"Schräge Kippung – Desorientierung, Unruhe, Spannung",
+        p:"by tilting the camera to a Dutch angle (approximately 15–25 degrees off horizontal), creating a visually unsettling diagonal horizon. This disorienting perspective conveys psychological tension, unease, instability, or a world off-balance.",
+        info:"Prompt-Tipp: 'Dutch angle' oder 'canted angle' – gib Grad-Zahl an (15-25°) für kontrollierte Schräge." },
+      { id:"ots", label:"Über-die-Schulter", desc:"Hinter einer zweiten Person – Gesprächssituation, Beziehung",
+        p:"from an over-the-shoulder perspective, framing the main subject as seen from just behind and to the side of a second person's shoulder. This perspective places the viewer within a conversation or relationship dynamic between two people.",
+        info:"Prompt-Tipp: 'Over-the-shoulder shot' (OTS) – Filmsprache für Gesprächs-Perspektive. Etablierte Technik." },
+    ];
+
+    /* ═══════ DOF / SHUTTER ═══════ */
+    const DOFS = [
+      { id:"open", label:"Offenere Blende (mehr Bokeh)", p:"Increase background depth-of-field blur significantly while keeping the main subject in tack-sharp focus. Match realistic lens behavior and natural optical falloff of a wide aperture (around f/1.4–f/2.8) with smooth, circular bokeh highlights in the background. Do not introduce artificial blur artifacts or alter the subject's edges.", info:"Prompt-Tipp: Nutze Blendenwerte (f/1.4, f/2.8) + 'bokeh'. Technischer als 'verschwommen'." },
+      { id:"closed", label:"Geschlossenere Blende (mehr Schärfe)", p:"Decrease background blur, bringing the entire scene from foreground to background into sharper focus. Match realistic lens behavior of a smaller aperture (around f/8–f/16) with deep depth of field. The image should resemble a real photo where everything is in focus.", info:"Prompt-Tipp: Blendenwerte wie f/8 oder f/16 + 'deep depth of field' erzeugen Tiefenschärfe." },
+      { id:"motion", label:"Bewegungsunschärfe", p:"Add realistic directional motion blur to the background or moving elements to suggest dynamic movement, while keeping the main subject in sharp focus. The blur should follow natural motion paths and resemble a panning shot with a slower shutter speed.", info:"Prompt-Tipp: 'Motion blur' + Richtung angeben. Unterscheide von 'bokeh' (Tiefenunschärfe)." },
+      { id:"longexp", label:"Langzeitbelichtung", p:"Simulate a long exposure effect: moving elements (water, clouds, traffic, light sources, people) should show smooth, silky, streaked motion trails while all static elements and the main subject remain perfectly sharp. Mimic the look of a multi-second tripod exposure – silky water, light trails from vehicles, ghosted pedestrians, streaked clouds.", info:"Prompt-Tipp: 'Long exposure' erzeugt Lichtspuren, seidiges Wasser. Beschreibe welche Elemente bewegt sind." },
+    ];
+
+    /* ═══════ COLOR CORRECTION ═══════ */
+    const COLOR_CORR = [
+      { id:"subjectsep", label:"Subject Separation", desc:"Subjekt vom Hintergrund abheben", p:"Subtly separate the main subject from the background by gently brightening the subject, enhancing its color saturation slightly, or applying a soft, natural-looking edge light/kicker that mimics gentle fill flash. The subject should stand out more clearly while maintaining photorealistic lighting. Do not create harsh edges, halos, or artificial-looking effects.", info:"Prompt-Tipp: 'Subject separation' durch 'edge light' oder 'subtle brightening'. Erkläre WIE getrennt wird." },
+      { id:"cinematic", label:"Cinematic", desc:"Tiefere Schwarzwerte, kinoreif", p:"Apply cinematic color grading: deepen blacks to rich, dense tones (lifted slightly, never fully crushed), enhance contrast in midtones, preserve highlight detail, add subtle vignetting. The image should feel like a high-budget film production with depth and visual weight.", info:"Prompt-Tipp: 'Cinematic grading' + 'lifted blacks' (nicht crushed!) + 'enhanced midtone contrast' = Filmreifer Look." },
+      { id:"denoise", label:"Rauschreduzierung", desc:"Dezentes Denoising, kein Aquarell-Look", p:"Apply subtle noise reduction to reduce digital noise and grain while fully preserving fine detail, skin texture, fabric weave, and edge sharpness. Do not create plastic skin, watercolor effects, or loss of detail. The result should look like a clean, high-ISO image processed carefully – smooth but natural.", info:"Prompt-Tipp: 'Subtle denoising' + WARNUNG 'preserve texture, no plastic skin'. Details bewahren ist kritisch!" },
+    ];
+
+    /* ═══════ FILM SIMULATION ═══════ */
+    const FILMS = [
+      { id:"bw", label:"Schwarzweiß (dramatisch)", desc:"Starker Kontrast, tiefe Schwarztöne, Textur", p:"Convert to dramatic black and white. High contrast with rich deep blacks and bright whites, strong tonal range, emphasized texture and form, fine monochrome grain reminiscent of Ilford HP5 or Tri-X 400 pushed one stop. Preserve the full dynamic range without crushing shadows or blowing highlights." },
+      { id:"cinematic", label:"Kinematisch / Filmlook", desc:"Teal & Orange, anamorphisch, Kino", p:"Regrade to a cinematic film look. Apply a teal-and-orange color grade with lifted shadows (never true black), slightly desaturated midtones, warm skin tones, and cool blue-green shadow tones. Add subtle anamorphic characteristics: gentle horizontal lens flares on bright sources, slight oval bokeh, and a cinematic vignette. The overall feeling should evoke a modern Hollywood production shot on anamorphic glass." },
+      { id:"desaturated", label:"Entsättigt / Muted", desc:"Gedämpfte Farben, zurückhaltend, melancholisch", p:"Desaturate the colors significantly while maintaining tonal variety. Muted, subdued palette with soft earth tones, reduced vibrancy, slightly lifted blacks, and cool undertones. The result should feel contemplative, melancholic, and understated – like faded editorial photography." },
+      { id:"dreamy", label:"Weichgezeichnet / Träumerisch", desc:"Soft Glow, Pastell, verträumt", p:"Apply a dreamy, soft-focus look. Add a gentle bloom/glow (Orton effect) around highlights, reduce contrast moderately, shift colors toward soft warm pastels, and introduce a subtle ethereal haze across the image. The result should feel romantic, nostalgic, and otherworldly – like a memory seen through soft gauze or a diffusion filter." },
+      { id:"nightflash", label:"Night Flash", desc:"Nacht + harter Blitz, glühende Haut, kinematisch", p:"Apply a bold night-flash aesthetic while fully preserving every original detail except for lighting, glow, and color mood. Keep the nighttime environment dark, deep, and unlit, maintaining all existing shadows and silhouettes. Do not brighten or alter the background except for slightly enhancing existing point lights. Illuminate the subject with a strong, warm, direct front-facing flash – the subject should be the brightest element in the frame. Add diffused light striking the subject's skin, creating glowing highlights on cheekbones, nose bridge, lips, and hair strands. Maintain clear separation between bright lit areas and soft deep shadows for a cinematic high-contrast mood. Inject subtle lens bloom, light haze, and a thin layer of atmospheric glow around face and shoulders. Render skin with luminous translucency and gentle peachy tones. Enhance stray hair strands backlit by light. Do not change the face, hair, composition, or background." },
+      { id:"cinestill", label:"CineStill 800T", desc:"Kühle Cyan-Schatten, Tungsten, Halation", p:"Regrade this photo to a CineStill 800T (800 Tungsten) lab scan look. Keep content identical, but overwrite the colors. Cooler overall balance with cool cyan/teal shadows, warm tungsten highlights, slightly stronger contrast, deeper blacks (do not crush), and saturated warm light sources. Add fine-to-medium 35mm color negative grain. Add signature CineStill halation: a subtle but clearly visible red/orange glow around bright point lights and strongest highlights only (streetlights, bulbs, neon, specular reflections). Make the change clearly visible." },
+      { id:"portra", label:"Kodak Portra 400", desc:"Warme Hauttöne, Pastell, organisch", p:"Regrade to a Kodak Portra 400 film look. Keep content identical. Warm, slightly desaturated tones with soft pastel highlights, creamy natural skin tones, gentle contrast, subtle warm color shift, fine organic 35mm grain. The result should feel like a professional analog portrait." },
+      { id:"nokia", label:"Altes Nokia mit Fotofunktion", desc:"Pixelig, rauschig, Y2K-Nostalgie", p:"Regrade to look like a blurry early-2000s Nokia phone camera capture: low-resolution, heavy digital noise, soft smeared details, pale desaturated skin tones, cool blue cast, harsh on-camera flash feel, flat contrast, pixelated edges, visible JPEG compression artifacts, accidental motion blur, candid snapshot look, nostalgic low-fi phone camera aesthetic." },
+      { id:"casio", label:"CASIO EXILIM EX-Z750", desc:"2006er Style, überschärft, pixelig", p:"Apply a Casio Exilim EX-Z750 digicam JPEG look. Apply Casio in-camera JPEG behavior: aggressive edge sharpening with halos, bright frontal flash exposure, flattened highlights, crushed shadows, heavy JPEG compression artifacts, and coarse chroma noise. Skin tones should feel slightly plasticky and over-processed. This must look like a raw 2006 flash digicam photo - same image, harsh Casio processing" },
+      { id:"polaroid", label:"Polaroid (ohne Rahmen)", desc:"Pastellig, weich, nostalgisch-analog", p:"Apply a Polaroid instant-film aesthetic without the physical frame: soft pastel colors, low contrast, creamy washed-out highlights, slight atmospheric haze, subtle blue-green tint in shadows, dreamy analog imperfection, very gentle fine grain, washed yet charming texture, nostalgic instant-film look. The result should feel like a warm, slightly faded Polaroid memory – soft, intimate, and imperfect in a beautiful way." },
+    ];
+
+    const UPSIZE_PROMPT = `Use the uploaded image as the only reference. Do not change the composition, objects, colors, lighting or any details. Do not add or remove anything. Recreate this image in the highest possible 4K resolution with ultra sharp details, crisp edges, intricate textures, high detail and sharp focus. It must stay visually identical to the original, only much sharper and higher resolution, suitable for a large 40×60 cm print in 4K.`;
+
+    /* ═══════ COMPONENTS ═══════ */
+    function InfoTooltip({ text }) {
+      const [show, setShow] = useState(false);
+      const tooltipRef = useRef(null);
+
+      useEffect(() => {
+        if (!show) return;
+        const handleClickOutside = (e) => {
+          if (tooltipRef.current && !tooltipRef.current.contains(e.target)) {
+            setShow(false);
+          }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('touchstart', handleClickOutside);
+        return () => {
+          document.removeEventListener('mousedown', handleClickOutside);
+          document.removeEventListener('touchstart', handleClickOutside);
+        };
+      }, [show]);
+
+      return (
+        <div ref={tooltipRef} className="relative inline-block">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setShow(v => !v); }}
+            className="inline-flex items-center justify-center"
+          >
+            <Info size={14} className="text-blue-500 cursor-pointer ml-1 hover:text-blue-700 active:text-blue-800 transition-colors" />
+          </button>
+          {show && (
+            <div className="absolute z-50 w-64 p-2.5 text-xs bg-gray-900 text-white rounded-lg shadow-xl -top-2 left-6 leading-relaxed">
+              {text}
+              <div className="absolute w-2 h-2 bg-gray-900 transform rotate-45 -left-1 top-3"></div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function LiveFeedback({ value }) {
+      if (!value || !value.trim()) return null;
+      const matchedTip = PROMPT_TIPS.find(t => t.trigger.test(value));
+      if (!matchedTip) return null;
+      return (
+        <div className="flex items-start gap-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+          <Sparkles size={14} className="shrink-0 mt-0.5 text-blue-500"/>
+          <span className="leading-relaxed">{matchedTip.tip}</span>
+        </div>
+      );
+    }
+
+    function Toggle({ active, onToggle, label }) {
+      return (
+        <button onClick={onToggle} className="flex items-center gap-3 w-full text-left">
+          <span className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${active ? 'bg-blue-600' : 'bg-gray-300'}`}>
+            <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform shadow ${active ? 'translate-x-6' : 'translate-x-1'}`}/>
+          </span>
+          <span className={`font-medium text-base ${active ? 'text-gray-900' : 'text-gray-500'}`}>{label}</span>
+        </button>
+      );
+    }
+
+    function Chip({ label, icon, desc, selected, onClick, wide, infoText, showInfo }) {
+      return (
+        <button onClick={onClick} className={`flex flex-col items-center gap-0.5 rounded-xl border text-center transition-all ${wide ? 'px-3 py-2 min-w-[7rem]' : 'px-2.5 py-2 min-w-[5.5rem]'} ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md scale-105' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:shadow-sm active:scale-95'}`}>
+          <div className="flex items-center gap-1">
+            {icon && <span className="text-base leading-none">{icon}</span>}
+            {showInfo && infoText && <InfoTooltip text={infoText}/>}
+          </div>
+          <span className="text-xs font-semibold leading-tight">{label}</span>
+          {desc && <span className={`text-[9px] leading-tight max-w-[8rem] ${selected ? 'text-blue-100' : 'text-gray-400'}`}>{desc}</span>}
+        </button>
+      );
+    }
+
+    function Pill({ label, desc, selected, onClick, infoText, showInfo }) {
+      return (
+        <button onClick={onClick} className={`text-left px-3 py-2 rounded-xl border transition-all ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 active:scale-95'}`}>
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-semibold block leading-tight">{label}</span>
+            {showInfo && infoText && <InfoTooltip text={infoText}/>}
+          </div>
+          {desc && <span className={`text-[9px] leading-tight block mt-0.5 ${selected ? 'text-blue-100' : 'text-gray-400'}`}>{desc}</span>}
+        </button>
+      );
+    }
+
+    function Card({ active, onToggle, label, icon, children, learnHint, showLearn }) {
+      return (
+        <div className={`rounded-xl border transition-all ${active ? 'border-blue-200 bg-blue-50/30 shadow-sm' : 'border-gray-200 bg-white'}`}>
+          <div className="p-4 flex items-center justify-between">
+            <Toggle active={active} onToggle={onToggle} label={`${icon} ${label}`}/>
+            {showLearn && learnHint && <InfoTooltip text={learnHint}/>}
+          </div>
+          {active && (
+            <div className="px-4 pb-4 space-y-3">{children}</div>
+          )}
+        </div>
+      );
+    }
+
+    function Sub({ title, children }) {
+      return <div className="space-y-2"><p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>{children}</div>;
+    }
+
+    /* ═══════ MAIN ═══════ */
+    function PromptBuilder() {
+      const [showIntro, setShowIntro] = useState(true);
+      const [copied, setCopied] = useState(false);
+      const [learnMode, setLearnMode] = useState(true);
+
+      // Objects
+      const [objOn, setObjOn] = useState(false);
+      const [objRemove, setObjRemove] = useState({on:false,desc:""});
+      const [objAdd, setObjAdd] = useState({on:false,desc:""});
+      const [objChange, setObjChange] = useState({on:false,desc:""});
+      const [objClothing, setObjClothing] = useState({on:false,desc:""});
+
+      // Light
+      const [ltOn, setLtOn] = useState(false);
+      const [ltMood, setLtMood] = useState("");
+      const [ltDir, setLtDir] = useState("");
+      const [ltCustom, setLtCustom] = useState("");
+
+      // Shot
+      const [shotOn, setShotOn] = useState(false);
+      const [shotId, setShotId] = useState("");
+      const [shotDetail, setShotDetail] = useState("");
+      const [shotCustom, setShotCustom] = useState("");
+
+      // Perspective
+      const [pOn, setPOn] = useState(false);
+      const [pId, setPId] = useState("");
+      const [pCustom, setPCustom] = useState("");
+
+      // DoF
+      const [dofOn, setDofOn] = useState(false);
+      const [dofId, setDofId] = useState("");
+      const [dofCustom, setDofCustom] = useState("");
+
+      // Color Correction
+      const [colorCorrOn, setColorCorrOn] = useState(false);
+      const [colorCorrId, setColorCorrId] = useState("");
+      const [colorCorrCustom, setColorCorrCustom] = useState("");
+
+      // Film Simulation
+      const [filmOn, setFilmOn] = useState(false);
+      const [filmId, setFilmId] = useState("");
+      const [filmCustom, setFilmCustom] = useState("");
+
+      // Upsize
+      const [upOn, setUpOn] = useState(false);
+
+      const anyActive = objOn||ltOn||shotOn||pOn||dofOn||upOn||colorCorrOn||filmOn;
+
+      const prompt = useMemo(() => {
+        if (!anyActive) return "";
+
+        let baseText = "Use the uploaded image as the single source of truth. Do not rotate or reposition the subject – remain the same size of the subject and keep the same pose and orientation.";
+
+        const preserveObjects = !(objOn && (objRemove.on || objAdd.on || objChange.on));
+        const preserveEnvironment = !(objOn && (objRemove.on || objAdd.on || objChange.on));
+
+        if (preserveObjects && preserveEnvironment) {
+          baseText += " The objects, environment and orientation must remain unchanged too.";
+        } else if (!preserveObjects && preserveEnvironment) {
+          baseText += " The environment and orientation must remain unchanged too.";
+        } else if (preserveObjects && !preserveEnvironment) {
+          baseText += " The objects and orientation must remain unchanged too.";
+        } else {
+          baseText += " The orientation must remain unchanged.";
+        }
+
+        let P = [{text: baseText, type: 'base'}];
+
+        if (objOn && objRemove.on && objRemove.desc.trim()) P.push({text: `Remove ${objRemove.desc.trim()} from the image. Preserve the main subject exactly. Do not change the subject's face, body, clothing, pose, or expression. Reconstruct the background naturally where removed elements were, matching the original location, architecture, lighting, shadows, and depth. Do not crop, blur, or stylize. The result should look like the photo was originally taken without ${objRemove.desc.trim()}.`, type: 'action'});
+        if (objOn && objAdd.on && objAdd.desc.trim()) P.push({text: `Add ${objAdd.desc.trim()} to the image. Integrate naturally with existing lighting, perspective, shadows, and depth of field. Preserve the main subject and all other elements exactly. The addition must look photorealistic, as if part of the original photograph.`, type: 'action'});
+        if (objOn && objChange.on && objChange.desc.trim()) P.push({text: `Modify the following: ${objChange.desc.trim()}. Integrate all changes naturally with existing lighting, perspective, shadows, and depth. Preserve everything else exactly. Fully photorealistic result.`, type: 'action'});
+        if (objOn && objClothing.on && objClothing.desc.trim()) P.push({text: `Use the uploaded subject image as the base and apply the uploaded clothing images as exact wardrobe references. ${objClothing.desc.trim()}. Fit them naturally onto the subject's body while preserving the subject's original face, body, pose, proportions, skin tone, hairstyle, and expression. The clothing must align correctly with the body, respect realistic garment structure (seams, sleeves, collars, waistlines, hems) with accurate fabric behavior (drape, stretch, thickness, natural folds). Fully photorealistic, high-detail fabric texture, correct cloth physics, clean edges, no warping, stylization, or body modification.`, type: 'action'});
+
+        if (ltOn) {
+          const m = LIGHT_MOOD.find(x=>x.id===ltMood);
+          const d = LIGHT_DIR.find(x=>x.id===ltDir);
+          if (m) P.push({text: m.p, type: 'action'});
+          if (d) P.push({text: d.p, type: 'action'});
+          if (ltCustom.trim()) P.push({text: `Additional lighting: ${ltCustom.trim()}`, type: 'action'});
+        }
+
+        if (shotOn || pOn) {
+          let cp = [];
+          const s = SHOTS.find(x=>x.id===shotId);
+          const pp = PERSPS.find(x=>x.id===pId);
+          if (s) { let t=s.p; if(s.needsDetail&&shotDetail.trim()) t=t.replace(/\[DETAIL\]/g,shotDetail.trim()); else if(s.needsDetail) t=t.replace(/\[DETAIL\]/g,"subject detail"); cp.push(t); }
+          if (pp) cp.push(pp.p);
+          if (shotCustom.trim()) cp.push(shotCustom.trim());
+          if (pCustom.trim()) cp.push(pCustom.trim());
+          if (cp.length) P.push({text: "Treat the entire scene as frozen. Re-render the image "+cp.join(" Additionally, re-render the image ")+"\n\nHARD RULE: All elements remain fixed. Everything but the camera position must remain unchanged.", type: 'action'});
+        }
+
+        if (dofOn) { const d=DOFS.find(x=>x.id===dofId); if(d)P.push({text: d.p, type: 'action'}); if(dofCustom.trim())P.push({text: `Additional: ${dofCustom.trim()}`, type: 'action'}); }
+        if (upOn) P.push({text: UPSIZE_PROMPT, type: 'action'});
+        if (colorCorrOn) { const cc=COLOR_CORR.find(x=>x.id===colorCorrId); if(cc)P.push({text: cc.p, type: 'action'}); if(colorCorrCustom.trim())P.push({text: `Additional color correction: ${colorCorrCustom.trim()}`, type: 'action'}); }
+        if (filmOn) { const f=FILMS.find(x=>x.id===filmId); if(f)P.push({text: f.p, type: 'vibe'}); if(filmCustom.trim())P.push({text: `Additional film simulation: ${filmCustom.trim()}`, type: 'vibe'}); }
+
+        return P;
+      }, [anyActive,objOn,objRemove,objAdd,objChange,objClothing,ltOn,ltMood,ltDir,ltCustom,shotOn,shotId,shotDetail,shotCustom,pOn,pId,pCustom,dofOn,dofId,dofCustom,upOn,colorCorrOn,colorCorrId,colorCorrCustom,filmOn,filmId,filmCustom]);
+
+      const promptText = useMemo(() => {
+        if (!prompt || prompt.length === 0) return "";
+        return prompt.map(p => p.text).join("\n\n");
+      }, [prompt]);
+
+      const [showExplanation, setShowExplanation] = useState(false);
+
+      const doCopy = async () => {
+        if (!promptText || promptText.trim() === "") {
+          alert("Kein Prompt zum Kopieren vorhanden!");
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(promptText);
+          setCopied(true);
+          if (learnMode) setShowExplanation(true);
+          setTimeout(()=>{
+            setCopied(false);
+            if (learnMode) setShowExplanation(false);
+          },8000);
+        } catch (err) {
+          console.error("Clipboard error:", err);
+          const textarea = document.createElement('textarea');
+          textarea.value = promptText;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand('copy');
+            setCopied(true);
+            if (learnMode) setShowExplanation(true);
+            setTimeout(()=>{
+              setCopied(false);
+              if (learnMode) setShowExplanation(false);
+            },8000);
+          } catch {
+            alert("Kopieren fehlgeschlagen. Bitte markiere den Text manuell und kopiere ihn mit Cmd/Ctrl+C.");
+          }
+          document.body.removeChild(textarea);
+        }
+      };
+
+      const ta = "w-full rounded-lg border border-gray-200 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent bg-white";
+
+      return (
+        <div className="min-h-screen bg-gray-50" style={{fontFamily:"system-ui,-apple-system,sans-serif"}}>
+          <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+
+            <header className="text-center space-y-3">
+              <div className="flex items-center justify-center gap-3">
+                <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Bildbearbeitung mit KI</h1>
+                <button
+                  onClick={() => setLearnMode(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${learnMode ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                >
+                  <GraduationCap size={16}/>
+                  Lern-Modus
+                </button>
+              </div>
+              <div className="max-w-xl mx-auto space-y-2">
+                <p className="text-gray-700 text-sm leading-relaxed">Deine Fotografie ist mit großem Aufwand angefertigt, aber dir wird jetzt erst klar, dass du etwas mehr Abstand zum Subjekt hättest haben sollen? Oder besser aus den Knien fotografiert hättest? Auch wäre es gut gewesen, wenn die Person ein weißes Kleid angehabt hätte und du ein zusätzliches Streiflicht gesetzt hättest?</p>
+                <p className="text-gray-700 text-sm leading-relaxed"><strong>Hier KANN bildgenerative künstliche Intelligenz helfen!</strong></p>
+                <p className="text-gray-600 text-sm">Lass dir einen Ausgangsprompt erstellen und probiere es aus!</p>
+                {learnMode && (
+                  <p className="text-xs text-blue-600 italic">💡 Lern-Modus aktiv: Du siehst Erklärungen zu Prompt-Techniken. Deaktiviere ihn für eine schlankere Oberfläche.</p>
+                )}
+              </div>
+            </header>
+
+            {/* DISCLAIMER */}
+            <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4 text-center shadow-md">
+              <p className="text-sm text-amber-900 leading-relaxed font-medium"><strong className="text-base">Dieser Prompt ist ein Vorschlag und eine Arbeitsgrundlage.</strong><br/>Passe ihn im Dialog mit der Bild-KI „iterativ" an, bis das Ergebnis stimmt. Je präziser du beschreibst, desto besser das Ergebnis.</p>
+            </div>
+
+            {/* INTRO */}
+            <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+              <button onClick={()=>setShowIntro(!showIntro)} className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50">
+                <span className="flex items-center gap-2 font-semibold text-sm text-gray-700"><AlertTriangle size={16} className="text-amber-500"/>Wichtige Hinweise &amp; Tipps</span>
+                {showIntro ? <ChevronUp size={18} className="text-gray-400"/> : <ChevronDown size={18} className="text-gray-400"/>}
+              </button>
+              {showIntro && (
+                <div className="px-4 pb-5 space-y-4 text-sm text-gray-700 leading-relaxed border-t border-gray-100 pt-4">
+                  <div>
+                    <p className="font-semibold text-gray-900 mb-1">Grundsätzlich</p>
+                    <p>Je präziser dein Prompt, desto gelungener das Ergebnis. Das gilt neben übergeordneten Bildstimmungen („Moods") auch für bildbeschreibende <strong>Fachsprache</strong>, da aktuelle „Denk"-Modelle nicht nur Schlüsselwörter aneinanderreihen, sondern neben Komposition und Fachtermini auch Physik und Absicht „verstehen".</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900 mb-1">Prompts in englischer Sprache</p>
+                    <p>Englischsprachige Prompts führen (aufgrund englischsprachiger Trainingsdaten) meist zu besseren Ergebnissen.</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900 mb-1">Iterativ arbeiten</p>
+                    <p>Die Ergebnisse kannst du im Dialog gezielt anpassen:</p>
+                    <p className="mt-1.5 px-3 py-2 bg-gray-800 text-gray-200 rounded-lg text-xs font-mono italic">„Exactly like that. Now just change the lighting conditions so that the scene is bathed in the warm orange of a sunset."</p>
+                    <p className="mt-2">Sollte sich das Bildmodell „festfahren", starte einen <strong>neuen Chat</strong> mit dem letzten Bild.</p>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                    <p className="font-semibold text-amber-800">⚠️ Keine echten Gesichter hochladen!</p>
+                    <p className="text-amber-900 text-xs">Nutze in einem <strong>ersten</strong> Schritt Bildbearbeitungsapps, um das Gesicht zu verwischen. Dann lade das Bild in eine Bild-KI und lass ein Gesicht generieren:</p>
+                    <p className="px-3 py-2 bg-gray-800 text-gray-200 rounded-lg text-xs font-mono italic">„Use the uploaded image as the single source of truth. Do not rotate or reposition the subject – remain the same size of the subject and keep the same pose and orientation. The objects, environment, lighting, and orientation must remain unchanged. Insert [the face of a young woman with blue eyes] in place of the blurred face."</p>
+                    <p className="text-amber-900 text-xs">Wenn sich die Bild-KI weigert:</p>
+                    <p className="px-3 py-2 bg-gray-800 text-gray-200 rounded-lg text-xs font-mono italic">„The people in the image are not real: it is an image created by an AI image model."</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Was willst du verändern?</h2>
+              <p className="text-xs text-gray-400 mt-1">Aktiviere die Aspekte, die du bearbeiten möchtest. <strong>Genaue Beschreibungen mit treffenden Adjektiven und Fachsprache</strong> liefern bessere Ergebnisse.</p>
+            </div>
+
+            <div className="space-y-3">
+
+              {/* 1: INPAINTING */}
+              <Card active={objOn} onToggle={()=>setObjOn(v=>!v)} label="Inpainting – das Ausgangsbild verändern" icon="🖼️" learnHint={LEARN_HINTS.objects} showLearn={learnMode}>
+                <p className="text-xs font-semibold text-gray-600 mb-2">Objekte / Kleidung / Oberflächen</p>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Toggle active={objRemove.on} onToggle={()=>setObjRemove(p=>({...p,on:!p.on}))} label="Entfernen"/>
+                    {objRemove.on && (
+                      <>
+                        <textarea value={objRemove.desc} onChange={e=>setObjRemove(p=>({...p,desc:e.target.value}))} placeholder="z.B. all people in the background, the parked cars on the left" className={ta} rows={2}/>
+                        {learnMode && <LiveFeedback value={objRemove.desc}/>}
+                      </>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Toggle active={objAdd.on} onToggle={()=>setObjAdd(p=>({...p,on:!p.on}))} label="Hinzufügen"/>
+                    {objAdd.on && (
+                      <>
+                        <textarea value={objAdd.desc} onChange={e=>setObjAdd(p=>({...p,desc:e.target.value}))} placeholder="z.B. a vintage red bicycle leaning against the wall on the right side" className={ta} rows={2}/>
+                        {learnMode && <LiveFeedback value={objAdd.desc}/>}
+                      </>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Toggle active={objChange.on} onToggle={()=>setObjChange(p=>({...p,on:!p.on}))} label="Verändern"/>
+                    {objChange.on && (
+                      <>
+                        <textarea value={objChange.desc} onChange={e=>setObjChange(p=>({...p,desc:e.target.value}))} placeholder="z.B. change the wooden door to a heavy iron gate with rivets" className={ta} rows={2}/>
+                        {learnMode && <LiveFeedback value={objChange.desc}/>}
+                      </>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Toggle active={objClothing.on} onToggle={()=>setObjClothing(p=>({...p,on:!p.on}))} label="Kleidung ändern (Referenzbild hochladen)"/>
+                    {objClothing.on && (
+                      <>
+                        <textarea value={objClothing.desc} onChange={e=>setObjClothing(p=>({...p,desc:e.target.value}))} placeholder="z.B. Replace the jacket with the uploaded denim jacket. Keep the original jeans." className={ta} rows={2}/>
+                        {learnMode && <LiveFeedback value={objClothing.desc}/>}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </Card>
+
+              {/* 2: LIGHT */}
+              <Card active={ltOn} onToggle={()=>setLtOn(v=>!v)} label="Lichtsetzung anpassen" icon="💡" learnHint={LEARN_HINTS.light} showLearn={learnMode}>
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-2.5 text-xs text-blue-800 leading-relaxed mb-3">
+                  <strong>Tipp:</strong> Beschreibe möglichst genau: <strong>Von wo</strong> kommt das Licht? Wie <strong>stark oder gedämpft</strong> ist es? Entstehen <strong>harte Schlagschatten</strong> oder <strong>weiche Binnenschatten</strong>? Ist es <strong>direktes</strong> oder <strong>diffuses</strong> Licht? Je präziser deine Lichtbeschreibung, desto realistischer das Ergebnis.
+                </div>
+                <Sub title="Lichtsetzung / Licht ergänzen">
+                  <div className="flex flex-wrap gap-2">{LIGHT_DIR.map(x=><Chip key={x.id} {...x} selected={ltDir===x.id} onClick={()=>setLtDir(v=>v===x.id?"":x.id)} wide infoText={x.info} showInfo={learnMode}/>)}</div>
+                  {ltDir && (
+                    <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                      💡 <strong>Beachte den Tipp oben:</strong> Beschreibe möglichst genau Ort und Intensität der Lichtquelle!
+                    </div>
+                  )}
+                </Sub>
+                <Sub title="Tageszeit / Lichtstimmung ändern">
+                  <div className="flex flex-wrap gap-2">{LIGHT_MOOD.map(x=><Chip key={x.id} {...x} selected={ltMood===x.id} onClick={()=>setLtMood(v=>v===x.id?"":x.id)} wide infoText={x.info} showInfo={learnMode}/>)}</div>
+                </Sub>
+                <textarea value={ltCustom} onChange={e=>setLtCustom(e.target.value)} placeholder="Eigene Lichtbeschreibung, z.B. strong warm key light from upper left at 45°, casting long hard shadows to the lower right. Soft cool fill from a window on the right side, reducing contrast slightly without eliminating shadows." className={ta} rows={3}/>
+                {learnMode && <LiveFeedback value={ltCustom}/>}
+              </Card>
+
+              {/* 3: SHOT SIZE */}
+              <Card active={shotOn} onToggle={()=>setShotOn(v=>!v)} label="Einstellungsgröße / Brennweite verändern" icon="📐" learnHint={LEARN_HINTS.shot} showLearn={learnMode}>
+                <div className="flex flex-wrap gap-2">{SHOTS.map(x=><Pill key={x.id} label={x.label} desc={x.desc} selected={shotId===x.id} onClick={()=>setShotId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
+                {shotId==="detail" && <input value={shotDetail} onChange={e=>setShotDetail(e.target.value)} placeholder="Welches Detail? z.B. hands, eyes, lips, ring on the finger" className="w-full rounded-lg border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"/>}
+                <textarea value={shotCustom} onChange={e=>setShotCustom(e.target.value)} placeholder="Optional: z.B. use an 85mm portrait lens feel with compressed background" className={ta} rows={2}/>
+                {learnMode && <LiveFeedback value={shotCustom}/>}
+              </Card>
+
+              {/* 4: PERSPECTIVE */}
+              <Card active={pOn} onToggle={()=>setPOn(v=>!v)} label="Kameraperspektive / Betrachterstandpunkt anpassen" icon="🎥" learnHint={LEARN_HINTS.perspective} showLearn={learnMode}>
+                <div className="flex flex-wrap gap-2">{PERSPS.map(x=><Pill key={x.id} label={x.label} desc={x.desc} selected={pId===x.id} onClick={()=>setPId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
+                <textarea value={pCustom} onChange={e=>setPCustom(e.target.value)} placeholder="Optional: z.B. slightly off-center framing, subject positioned in the left third" className={ta} rows={2}/>
+                {learnMode && <LiveFeedback value={pCustom}/>}
+              </Card>
+
+              {/* 5: DOF */}
+              <Card active={dofOn} onToggle={()=>setDofOn(v=>!v)} label="Blende / Verschlusszeit anpassen" icon="🔍" learnHint={LEARN_HINTS.dof} showLearn={learnMode}>
+                <div className="flex flex-wrap gap-2">{DOFS.map(x=><Pill key={x.id} label={x.label} selected={dofId===x.id} onClick={()=>setDofId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
+                <textarea value={dofCustom} onChange={e=>setDofCustom(e.target.value)} placeholder="Optional: z.B. simulate f/1.2 bokeh with smooth circular highlights" className={ta} rows={2}/>
+                {learnMode && <LiveFeedback value={dofCustom}/>}
+              </Card>
+
+              {/* 6: UPSIZE */}
+              <Card active={upOn} onToggle={()=>setUpOn(v=>!v)} label="Wenn du mit dem Ergebnis zufrieden bist: Bild hochskalieren (Upsize)" icon="⬆️" showLearn={false}>
+                <p className="text-xs text-gray-500">Skaliert auf 4K für 40×60 cm Druck. Als <strong>letzten</strong> Schritt in einem <strong>separaten Durchgang</strong> verwenden.</p>
+              </Card>
+
+              {/* 7: COLOR CORRECTION + FILM */}
+              <div className="mt-10 pt-8 border-t-4 border-amber-400">
+                <div className="p-5 bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-500 rounded-2xl shadow-lg">
+                  <div className="flex items-start gap-3 mb-5">
+                    <AlertTriangle size={28} className="text-amber-600 shrink-0 mt-1"/>
+                    <div className="text-sm text-amber-900 leading-relaxed">
+                      <p className="font-bold text-base mb-1">⚠️ Vorsicht hiermit!</p>
+                      <p>Das geht genau so gut in Apps für Bildbearbeitung → <strong>"Skill-Skipping"</strong> ☝️</p>
+                      <p className="text-xs mt-2 text-amber-700">Diese Funktionen ersetzen nicht das Erlernen echter Bildbearbeitungs-Skills.</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Card active={colorCorrOn} onToggle={()=>setColorCorrOn(v=>!v)} label="Farbkorrektur vornehmen" icon="🎨" learnHint={LEARN_HINTS.colorCorr} showLearn={learnMode}>
+                      <div className="flex flex-wrap gap-2">{COLOR_CORR.map(x=><Pill key={x.id} label={x.label} desc={x.desc} selected={colorCorrId===x.id} onClick={()=>setColorCorrId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
+                      <textarea value={colorCorrCustom} onChange={e=>setColorCorrCustom(e.target.value)} placeholder="Eigene Farbkorrektur, z.B. lift midtones slightly, add warmth to skin tones" className={ta} rows={2}/>
+                      {learnMode && <LiveFeedback value={colorCorrCustom}/>}
+                    </Card>
+
+                    <Card active={filmOn} onToggle={()=>setFilmOn(v=>!v)} label="Looks simulieren" icon="🎞️" learnHint={LEARN_HINTS.film} showLearn={learnMode}>
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3 text-xs text-amber-800 leading-relaxed">
+                        <strong>⚠️ Mit Vorsicht verwenden</strong> – kann leicht unpassend wirken!
+                      </div>
+                      <div className="flex flex-wrap gap-2">{FILMS.map(x=><Chip key={x.id} label={x.label} desc={x.desc} selected={filmId===x.id} onClick={()=>setFilmId(v=>v===x.id?"":x.id)} wide/>)}</div>
+                      <textarea value={filmCustom} onChange={e=>setFilmCustom(e.target.value)} placeholder="Eigene Filmsimulation, z.B. Fuji Pro 400H look with soft greens and magentas" className={ta} rows={2}/>
+                      {learnMode && <LiveFeedback value={filmCustom}/>}
+                    </Card>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* PROMPT OUTPUT */}
+            {anyActive && (
+              <div className="rounded-xl border-2 border-blue-200 bg-white shadow-md overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 bg-blue-50 border-b border-blue-100">
+                  <span className="flex items-center gap-2 font-semibold text-sm text-blue-800"><Sparkles size={16}/>Dein Prompt-Vorschlag</span>
+                  <button
+                    onClick={doCopy}
+                    disabled={!promptText || promptText.trim() === ""}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      copied
+                        ? 'bg-green-600 text-white'
+                        : (!promptText || promptText.trim() === "")
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95 cursor-pointer'
+                    }`}
+                  >
+                    {copied ? <><Check size={16}/> Kopiert!</> : <><Copy size={16}/> In Zwischenablage</>}
+                  </button>
+                </div>
+                <div className="p-4">
+                  <p className="text-[10px] text-gray-400 mb-2 italic">Dies ist eine Arbeitsgrundlage – passe den Prompt im Dialog mit der Bild-KI „iterativ" an.</p>
+
+                  {showExplanation && learnMode && (
+                    <div className="mb-4 p-3 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs font-semibold text-blue-900 mb-2">📚 Warum ist der Prompt so formuliert?</p>
+                      <div className="space-y-2 text-xs text-gray-700 leading-relaxed">
+                        <p><strong>🌍 Englische Sprache:</strong> Bildmodelle verarbeiten englischsprachige Prompts (noch) besser, da sie primär auf englischen Daten trainiert wurden.</p>
+                        <p><strong>🔒 Basis-Anweisung:</strong> "Use the uploaded image as source of truth" gibt dem Modell die Voraussetzung, dass wirklich nichts am Ausgangsbild verändert werden darf und alles "an Ort und Stelle" bleibt.</p>
+                        {(ltOn && (ltMood || ltDir)) && (
+                          <p><strong>💡 Licht-Details:</strong> Hier werden präzise Angaben zur Lichtrichtung, Intensität und entstehenden Schatten angegeben. Die Verwendung von Fachsprache ist hier besonders sinnvoll!</p>
+                        )}
+                        {(shotOn || pOn) && (
+                          <p><strong>📐 Kamera-Fachbegriffe:</strong> Etablierte Film- und Foto-Terminologie wie "medium close-up", "low angle" oder "Dutch tilt" sind dem Modell bekannt und erzeugen präzisere Ergebnisse.</p>
+                        )}
+                        {(colorCorrOn || filmOn) && (
+                          <p><strong>🎨 Farb-Looks:</strong> Spezifische Film-Namen (CineStill 800T, Portra 400) oder technische Begriffe ("lifted blacks", "crushed highlights") vermitteln dem Modell exakte visuelle Ziele.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {learnMode && prompt && prompt.length > 0 && (
+                    <div className="mb-3 p-2 bg-gray-50 rounded-lg border border-gray-200">
+                      <p className="text-xs font-semibold text-gray-700 mb-2">📚 Prompt-Struktur verstehen:</p>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded bg-blue-500"></span>
+                          <span className="text-gray-700"><strong>Blau:</strong> Subjekt/Umgebung bewahren (z.B. "preserve main subject", "do not change pose")</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded bg-green-500"></span>
+                          <span className="text-gray-700"><strong>Grün:</strong> Technische Aktionen (z.B. "apply Rembrandt lighting", "reframe to close-up", "f/1.4 bokeh")</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded bg-amber-500"></span>
+                          <span className="text-gray-700"><strong>Gelb:</strong> Vibe/Genre/Referenz (z.B. "CineStill 800T look", "cinematic mood", "1960s editorial")</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {promptText ? (
+                    learnMode ? (
+                      <div className="space-y-2">
+                        {prompt.map((part, idx) => {
+                          let colorClass = "";
+                          if (part.type === 'base') colorClass = "text-blue-700 bg-blue-50 border-l-4 border-blue-500";
+                          else if (part.type === 'action') colorClass = "text-green-700 bg-green-50 border-l-4 border-green-500";
+                          else if (part.type === 'vibe') colorClass = "text-amber-700 bg-amber-50 border-l-4 border-amber-500";
+
+                          return (
+                            <div key={idx} className={`p-2 rounded text-sm leading-relaxed font-mono ${colorClass}`}>
+                              {part.text}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <pre className="whitespace-pre-wrap text-sm text-gray-800 leading-relaxed font-mono break-words select-all">{promptText}</pre>
+                    )
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">Fülle mindestens ein Feld aus, um einen Prompt zu generieren.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <footer className="text-center text-xs text-gray-300 pb-6 pt-2">Prompts in englischer Sprache · Ergebnisse „iterativ" im Dialog anpassen</footer>
+          </div>
+        </div>
+      );
+    }
+
+    createRoot(document.getElementById("root")).render(<PromptBuilder />);
+  </script>
+</body>
+</html>
