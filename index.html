@@ -5,8 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Bildbearbeitung mit KI – Prompt-Builder</title>
 
+  <!-- Google Fonts: Plus Jakarta Sans (modern, jugendlich, gut lesbar) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
   <!-- Tailwind (Play CDN, JIT im Browser) -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
 
   <!-- Importmap: React + lucide-react via esm.sh -->
   <script type="importmap">
@@ -30,7 +46,7 @@
     .select-all { user-select: all; -webkit-user-select: all; }
   </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 font-sans">
   <div id="root"></div>
 
   <script type="text/babel" data-type="module" data-presets="react">
@@ -271,9 +287,20 @@
       );
     }
 
-    function Card({ active, onToggle, label, icon, children, learnHint, showLearn }) {
+    function Card({ active, onToggle, label, icon, children, learnHint, showLearn, accent = "blue" }) {
+      const accents = {
+        blue:    { topBorder: 'border-t-blue-400',    activeBg: 'bg-blue-50/40',    activeBorder: 'border-blue-200' },
+        pink:    { topBorder: 'border-t-pink-400',    activeBg: 'bg-pink-50/40',    activeBorder: 'border-pink-200' },
+        amber:   { topBorder: 'border-t-amber-400',   activeBg: 'bg-amber-50/40',   activeBorder: 'border-amber-200' },
+        cyan:    { topBorder: 'border-t-cyan-500',    activeBg: 'bg-cyan-50/40',    activeBorder: 'border-cyan-200' },
+        violet:  { topBorder: 'border-t-violet-400',  activeBg: 'bg-violet-50/40',  activeBorder: 'border-violet-200' },
+        emerald: { topBorder: 'border-t-emerald-400', activeBg: 'bg-emerald-50/40', activeBorder: 'border-emerald-200' },
+        indigo:  { topBorder: 'border-t-indigo-400',  activeBg: 'bg-indigo-50/40',  activeBorder: 'border-indigo-200' },
+        rose:    { topBorder: 'border-t-rose-400',    activeBg: 'bg-rose-50/40',    activeBorder: 'border-rose-200' },
+      };
+      const a = accents[accent] || accents.blue;
       return (
-        <div className={`rounded-xl border transition-all ${active ? 'border-blue-200 bg-blue-50/30 shadow-sm' : 'border-gray-200 bg-white'}`}>
+        <div className={`rounded-xl border border-t-4 ${a.topBorder} transition-all ${active ? `${a.activeBorder} ${a.activeBg} shadow-sm` : 'border-gray-200 bg-white'}`}>
           <div className="p-4 flex items-center justify-between">
             <Toggle active={active} onToggle={onToggle} label={`${icon} ${label}`}/>
             {showLearn && learnHint && <InfoTooltip text={learnHint}/>}
@@ -437,18 +464,23 @@
       const ta = "w-full rounded-lg border border-gray-200 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent bg-white";
 
       return (
-        <div className="min-h-screen bg-gray-50" style={{fontFamily:"system-ui,-apple-system,sans-serif"}}>
+        <div className="min-h-screen bg-gray-50 font-sans">
           <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
 
             <header className="text-center space-y-3">
-              <div className="flex items-center justify-center gap-3">
-                <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Bildbearbeitung mit KI</h1>
+              <div className="flex items-center justify-center gap-3 flex-wrap">
+                <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 via-violet-600 to-pink-600 bg-clip-text text-transparent">Bildbearbeitung mit KI</h1>
                 <button
                   onClick={() => setLearnMode(v => !v)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${learnMode ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold transition-all duration-200 ${
+                    learnMode
+                      ? 'bg-gradient-to-r from-blue-500 via-violet-500 to-pink-500 text-white shadow-lg shadow-violet-500/30 scale-105'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
                 >
-                  <GraduationCap size={16}/>
+                  <GraduationCap size={18}/>
                   Lern-Modus
+                  {learnMode && <span className="ml-0.5 px-1.5 py-0.5 text-[10px] font-extrabold bg-white/25 rounded-full tracking-wider">AN</span>}
                 </button>
               </div>
               <div className="max-w-xl mx-auto space-y-2">
@@ -456,7 +488,12 @@
                 <p className="text-gray-700 text-sm leading-relaxed"><strong>Hier KANN bildgenerative künstliche Intelligenz helfen!</strong></p>
                 <p className="text-gray-600 text-sm">Lass dir einen Ausgangsprompt erstellen und probiere es aus!</p>
                 {learnMode && (
-                  <p className="text-xs text-blue-600 italic">💡 Lern-Modus aktiv: Du siehst Erklärungen zu Prompt-Techniken. Deaktiviere ihn für eine schlankere Oberfläche.</p>
+                  <div className="flex justify-center">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-50 via-violet-50 to-pink-50 border border-violet-200 rounded-full text-xs text-violet-800 shadow-sm">
+                      <Sparkles size={13} className="text-violet-500"/>
+                      <span><strong>Lern-Modus aktiv</strong> – Erklärungen zu Prompt-Techniken werden angezeigt</span>
+                    </div>
+                  </div>
                 )}
               </div>
             </header>
@@ -507,7 +544,7 @@
             <div className="space-y-3">
 
               {/* 1: INPAINTING */}
-              <Card active={objOn} onToggle={()=>setObjOn(v=>!v)} label="Inpainting – das Ausgangsbild verändern" icon="🖼️" learnHint={LEARN_HINTS.objects} showLearn={learnMode}>
+              <Card active={objOn} onToggle={()=>setObjOn(v=>!v)} label="Inpainting – das Ausgangsbild verändern" icon="🖼️" learnHint={LEARN_HINTS.objects} showLearn={learnMode} accent="pink">
                 <p className="text-xs font-semibold text-gray-600 mb-2">Objekte / Kleidung / Oberflächen</p>
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -550,7 +587,7 @@
               </Card>
 
               {/* 2: LIGHT */}
-              <Card active={ltOn} onToggle={()=>setLtOn(v=>!v)} label="Lichtsetzung anpassen" icon="💡" learnHint={LEARN_HINTS.light} showLearn={learnMode}>
+              <Card active={ltOn} onToggle={()=>setLtOn(v=>!v)} label="Lichtsetzung anpassen" icon="💡" learnHint={LEARN_HINTS.light} showLearn={learnMode} accent="amber">
                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-2.5 text-xs text-blue-800 leading-relaxed mb-3">
                   <strong>Tipp:</strong> Beschreibe möglichst genau: <strong>Von wo</strong> kommt das Licht? Wie <strong>stark oder gedämpft</strong> ist es? Entstehen <strong>harte Schlagschatten</strong> oder <strong>weiche Binnenschatten</strong>? Ist es <strong>direktes</strong> oder <strong>diffuses</strong> Licht? Je präziser deine Lichtbeschreibung, desto realistischer das Ergebnis.
                 </div>
@@ -570,7 +607,7 @@
               </Card>
 
               {/* 3: SHOT SIZE */}
-              <Card active={shotOn} onToggle={()=>setShotOn(v=>!v)} label="Einstellungsgröße / Brennweite verändern" icon="📐" learnHint={LEARN_HINTS.shot} showLearn={learnMode}>
+              <Card active={shotOn} onToggle={()=>setShotOn(v=>!v)} label="Einstellungsgröße / Brennweite verändern" icon="📐" learnHint={LEARN_HINTS.shot} showLearn={learnMode} accent="cyan">
                 <div className="flex flex-wrap gap-2">{SHOTS.map(x=><Pill key={x.id} label={x.label} desc={x.desc} selected={shotId===x.id} onClick={()=>setShotId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
                 {shotId==="detail" && <input value={shotDetail} onChange={e=>setShotDetail(e.target.value)} placeholder="Welches Detail? z.B. hands, eyes, lips, ring on the finger" className="w-full rounded-lg border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"/>}
                 <textarea value={shotCustom} onChange={e=>setShotCustom(e.target.value)} placeholder="Optional: z.B. use an 85mm portrait lens feel with compressed background" className={ta} rows={2}/>
@@ -578,21 +615,21 @@
               </Card>
 
               {/* 4: PERSPECTIVE */}
-              <Card active={pOn} onToggle={()=>setPOn(v=>!v)} label="Kameraperspektive / Betrachterstandpunkt anpassen" icon="🎥" learnHint={LEARN_HINTS.perspective} showLearn={learnMode}>
+              <Card active={pOn} onToggle={()=>setPOn(v=>!v)} label="Kameraperspektive / Betrachterstandpunkt anpassen" icon="🎥" learnHint={LEARN_HINTS.perspective} showLearn={learnMode} accent="violet">
                 <div className="flex flex-wrap gap-2">{PERSPS.map(x=><Pill key={x.id} label={x.label} desc={x.desc} selected={pId===x.id} onClick={()=>setPId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
                 <textarea value={pCustom} onChange={e=>setPCustom(e.target.value)} placeholder="Optional: z.B. slightly off-center framing, subject positioned in the left third" className={ta} rows={2}/>
                 {learnMode && <LiveFeedback value={pCustom}/>}
               </Card>
 
               {/* 5: DOF */}
-              <Card active={dofOn} onToggle={()=>setDofOn(v=>!v)} label="Blende / Verschlusszeit anpassen" icon="🔍" learnHint={LEARN_HINTS.dof} showLearn={learnMode}>
+              <Card active={dofOn} onToggle={()=>setDofOn(v=>!v)} label="Blende / Verschlusszeit anpassen" icon="🔍" learnHint={LEARN_HINTS.dof} showLearn={learnMode} accent="emerald">
                 <div className="flex flex-wrap gap-2">{DOFS.map(x=><Pill key={x.id} label={x.label} selected={dofId===x.id} onClick={()=>setDofId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
                 <textarea value={dofCustom} onChange={e=>setDofCustom(e.target.value)} placeholder="Optional: z.B. simulate f/1.2 bokeh with smooth circular highlights" className={ta} rows={2}/>
                 {learnMode && <LiveFeedback value={dofCustom}/>}
               </Card>
 
               {/* 6: UPSIZE */}
-              <Card active={upOn} onToggle={()=>setUpOn(v=>!v)} label="Wenn du mit dem Ergebnis zufrieden bist: Bild hochskalieren (Upsize)" icon="⬆️" showLearn={false}>
+              <Card active={upOn} onToggle={()=>setUpOn(v=>!v)} label="Wenn du mit dem Ergebnis zufrieden bist: Bild hochskalieren (Upsize)" icon="⬆️" showLearn={false} accent="indigo">
                 <p className="text-xs text-gray-500">Skaliert auf 4K für 40×60 cm Druck. Als <strong>letzten</strong> Schritt in einem <strong>separaten Durchgang</strong> verwenden.</p>
               </Card>
 
@@ -609,13 +646,13 @@
                   </div>
 
                   <div className="space-y-3">
-                    <Card active={colorCorrOn} onToggle={()=>setColorCorrOn(v=>!v)} label="Farbkorrektur vornehmen" icon="🎨" learnHint={LEARN_HINTS.colorCorr} showLearn={learnMode}>
+                    <Card active={colorCorrOn} onToggle={()=>setColorCorrOn(v=>!v)} label="Farbkorrektur vornehmen" icon="🎨" learnHint={LEARN_HINTS.colorCorr} showLearn={learnMode} accent="rose">
                       <div className="flex flex-wrap gap-2">{COLOR_CORR.map(x=><Pill key={x.id} label={x.label} desc={x.desc} selected={colorCorrId===x.id} onClick={()=>setColorCorrId(v=>v===x.id?"":x.id)} infoText={x.info} showInfo={learnMode}/>)}</div>
                       <textarea value={colorCorrCustom} onChange={e=>setColorCorrCustom(e.target.value)} placeholder="Eigene Farbkorrektur, z.B. lift midtones slightly, add warmth to skin tones" className={ta} rows={2}/>
                       {learnMode && <LiveFeedback value={colorCorrCustom}/>}
                     </Card>
 
-                    <Card active={filmOn} onToggle={()=>setFilmOn(v=>!v)} label="Looks simulieren" icon="🎞️" learnHint={LEARN_HINTS.film} showLearn={learnMode}>
+                    <Card active={filmOn} onToggle={()=>setFilmOn(v=>!v)} label="Looks simulieren" icon="🎞️" learnHint={LEARN_HINTS.film} showLearn={learnMode} accent="rose">
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3 text-xs text-amber-800 leading-relaxed">
                         <strong>⚠️ Mit Vorsicht verwenden</strong> – kann leicht unpassend wirken!
                       </div>
